@@ -121,6 +121,7 @@ export default function Home() {
         contractAddress: wallet.address,
         entrypoint: "get_owner",
       });
+      console.log(`Starknet account is controlled by ${publicKey}`);
 
       const BUNDLER_RPC = `https://rpc.zerodev.app/api/v2/bundler/${process.env.NEXT_PUBLIC_ZERODEV_PROJECT_ID}`;
       const PAYMASTER_RPC = `https://rpc.zerodev.app/api/v2/paymaster/${process.env.NEXT_PUBLIC_ZERODEV_PROJECT_ID}`;
@@ -129,7 +130,7 @@ export default function Home() {
         transport: http(BUNDLER_RPC),
         chain,
       });
-      const privateKey = keccak256(publicKey as Hex);
+      const privateKey = keccak256(wallet.address as Hex);
       const signer = privateKeyToAccount(privateKey);
 
       const entryPoint = ENTRYPOINT_ADDRESS_V07;
