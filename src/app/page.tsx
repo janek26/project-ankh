@@ -35,6 +35,13 @@ function formatAddress(address: string): string {
   return `${address.slice(0, 6)}...${address.slice(-4)}`;
 }
 
+function formatBalance(balance: bigint, decimals: number = 18): string {
+  const balanceStr = balance.toString();
+  const integerPart = balanceStr.slice(0, -decimals) || "0";
+  const decimalPart = balanceStr.slice(-decimals).padStart(decimals, "0");
+  return `${integerPart}.${decimalPart} ETH`;
+}
+
 interface StringStruct {
   len: BigNumberish;
   data: BigNumberish[];
@@ -83,6 +90,26 @@ export default function Home() {
         >
       >
     >();
+  const [l1EthereumBalance, setL1EthereumBalance] = useState<bigint | null>(
+    null
+  );
+  const [isWaitingForUserOp, setIsWaitingForUserOp] = useState(false);
+  const [userOpHash, setUserOpHash] = useState<string | null>(null);
+
+  const updateBalance = useCallback(async (address: Hex) => {
+    const BUNDLER_RPC = `https://rpc.zerodev.app/api/v2/bundler/${process.env.NEXT_PUBLIC_ZERODEV_PROJECT_ID}`;
+
+    const publicClient = createPublicClient({
+      transport: http(BUNDLER_RPC),
+      chain,
+    });
+
+    const balance = await publicClient.getBalance({
+      address,
+    });
+
+    setL1EthereumBalance(balance);
+  }, []);
 
   const createL1Wallet = useCallback(
     async (wallet: AccountInterface) => {
@@ -140,9 +167,11 @@ export default function Home() {
         },
       });
 
+      await updateBalance(account.address);
+
       setL1Wallet(kernelClient);
     },
-    [setL1Wallet]
+    [updateBalance]
   );
 
   useEffect(() => {
@@ -157,7 +186,7 @@ export default function Home() {
   }, []);
 
   return (
-    <main className="flex flex-col items-center justify-center h-screen space-y-4">
+    <main className="flex flex-col items-center justify-center h-screen space-y-4 text-center p-8">
       <Image src={LogoImg} alt="Logo" width={200} height={200} />
       <h1 className="text-4xl font-bold mb-4">Welcome to Ankh!</h1>
       {!wallet && (
@@ -187,17 +216,18 @@ export default function Home() {
           <LoaderIcon className="animate-spin" />
         </>
       )}
-      {l1wallet && wallet && (
+      {l1wallet && wallet && !userOpHash && (
         <div>
           <p>
             Your Starknet wallet{" "}
             <Address type="starknet" address={wallet.address} /> now controls L1
             wallet{" "}
-            <Address type="ethereum" address={l1wallet.account.address} />.
+            <Address type="ethereum" address={l1wallet.account.address} /> with
+            an balance of {formatBalance(l1EthereumBalance ?? BigInt(0))}.
           </p>
 
           <form
-            className="space-y-2 mt-10"
+            className="space-y-2 mt-10 text-left"
             onSubmit={async (e) => {
               e.preventDefault();
               const form = e.target as HTMLFormElement;
@@ -238,6 +268,7 @@ export default function Home() {
               console.log("signed tx", sig);
 
               console.log("sending tx", recipient, value, data);
+              setIsWaitingForUserOp(true);
               const userOpHash = await l1wallet.sendUserOperation({
                 userOperation: {
                   callData: await l1wallet.account.encodeCallData({
@@ -248,6 +279,7 @@ export default function Home() {
                 },
               });
               console.log("Submitted UserOp:", userOpHash);
+              setUserOpHash(userOpHash);
 
               const entryPoint = ENTRYPOINT_ADDRESS_V07;
               const bundlerClient = l1wallet.extend(bundlerActions(entryPoint));
@@ -258,6 +290,10 @@ export default function Home() {
                 timeout: 120000,
               });
               console.log("UserOp confirmed:", receipt.userOpHash);
+              // wait 2 extra seconds for the transaction to be confirmed
+              await new Promise((resolve) => setTimeout(resolve, 2000));
+              await updateBalance(l1wallet.account.address);
+              setIsWaitingForUserOp(false);
             }}
           >
             <h2 className="text-2xl font-bold mb-2">Send L1 Transaction</h2>
@@ -277,9 +313,45 @@ export default function Home() {
               Data:
               <Textarea name="data" value={"0x"} />
             </label>
-            <Button type="submit">Send Transaction</Button>
+            <Button className="w-full" type="submit">
+              Send Transaction
+            </Button>
           </form>
         </div>
+      )}
+      {userOpHash && (
+        <>
+          {isWaitingForUserOp ? (
+            <>
+              <p>Waiting for User Operation to be confirmed...</p>
+              <LoaderIcon className="animate-spin" />
+            </>
+          ) : (
+            <>
+              {wallet && l1wallet && (
+                <p>
+                  Your Starknet wallet{" "}
+                  <Address type="starknet" address={wallet.address} /> now
+                  controls L1 wallet{" "}
+                  <Address type="ethereum" address={l1wallet.account.address} />{" "}
+                  with an balance of{" "}
+                  {formatBalance(l1EthereumBalance ?? BigInt(0))}.
+                </p>
+              )}
+              <p>User Operation confirmed!</p>
+            </>
+          )}
+          {userOpHash && (
+            <a
+              href={`https://jiffyscan.xyz/userOpHash/${userOpHash}?network=sepolia`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-500 hover:underline"
+            >
+              Open UserOp in Jiffyscan
+            </a>
+          )}
+        </>
       )}
     </main>
   );
